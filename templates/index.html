@@ -439,14 +439,18 @@ async function doRedact(){
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify({file_id:entry.fileId, options:buildOptions()})
       });
-      const j = await r.json();
-      if(j.error) throw new Error(j.error+(j.traceback?'\n'+j.traceback:''));
-
-      // Show tappable download link — iOS blocks programmatic a.click()
-      entry.downloadUrl = '/download/'+encodeURIComponent(j.download_id);
-      entry.downloadName = j.filename;
+      if(!r.ok){
+        const j = await r.json().catch(()=>({error:'Redaction failed'}));
+        throw new Error(j.error||'Redaction failed');
+      }
+      // Backend streams the file directly as binary
+      const blob = await r.blob();
+      const dlName = (r.headers.get('Content-Disposition')||'').match(/filename="?([^"\n]+)"?/)?.[1]
+        || entry.file.name.replace(/\.(\w+)$/,'_REDACTED.$1');
+      entry.downloadUrl = URL.createObjectURL(blob);
+      entry.downloadName = dlName;
       entry.status='done';
-      setStatus(`✔ Done — tap the download button below`,'ok',100);
+      setStatus(`✔ Done — tap the Download button`,'ok',100);
     }catch(e){
       entry.status='error';
       entry.error = e.message.split('\n')[0];
