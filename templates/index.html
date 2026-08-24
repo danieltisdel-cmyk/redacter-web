@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Redacter ✦</title>
+<style>
+  :root{
+    --bg:#0f1117; --surface:#1a1d27; --surface2:#22263a;
+    --border:#2e3250; --accent:#6c63ff; --accent2:#8b80ff;
+    --red:#ff4d6d; --green:#4ade80; --text:#e2e8f0;
+    --muted:#64748b; --chip:#2e3250; --radius:10px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh;display:flex;flex-direction:column}
+
+  /* ── Header ── */
+  header{display:flex;justify-content:space-between;align-items:center;padding:18px 32px;border-bottom:1px solid var(--border);background:var(--surface)}
+  .logo{font-size:1.5rem;font-weight:700;letter-spacing:-.5px;color:#fff}
+  .logo span{color:var(--accent)}
+  .tagline{font-size:.85rem;color:var(--muted)}
+
+  /* ── Main layout ── */
+  main{display:grid;grid-template-columns:340px 1fr;gap:0;flex:1;overflow:hidden}
+  aside{background:var(--surface);border-right:1px solid var(--border);padding:24px;overflow-y:auto;display:flex;flex-direction:column;gap:20px}
+  .workspace{padding:28px 32px;display:flex;flex-direction:column;gap:20px;overflow-y:auto}
+
+  /* ── Section headings ── */
+  .section-title{font-size:.7rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px}
+
+  /* ── Upload zone ── */
+  .drop-zone{
+    border:2px dashed var(--border);border-radius:var(--radius);
+    padding:48px 24px;text-align:center;cursor:pointer;
+    transition:.2s;position:relative;background:var(--surface);
+  }
+  .drop-zone.drag-over{border-color:var(--accent);background:#1e1b3a}
+  .drop-zone .icon{font-size:3rem;margin-bottom:12px;display:block}
+  .drop-zone .label{color:var(--muted);font-size:.95rem;line-height:1.6}
+  .drop-zone .label strong{color:var(--accent2);cursor:pointer}
+  .drop-zone input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+  .accepted{font-size:.72rem;color:var(--muted);margin-top:8px}
+
+  /* ── File queue ── */
+  .file-queue{display:flex;flex-direction:column;gap:8px}
+  .file-item{display:flex;align-items:center;gap:12px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px}
+  .file-item .fi-name{flex:1;font-size:.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .file-item .fi-size{font-size:.78rem;color:var(--muted);white-space:nowrap}
+  .file-item .fi-remove{background:none;border:none;color:var(--muted);cursor:pointer;font-size:1.1rem;padding:2px 6px;border-radius:4px;transition:.15s}
+  .file-item .fi-remove:hover{color:var(--red);background:#2a1a1f}
+  .file-item .fi-status{font-size:.75rem;padding:2px 8px;border-radius:99px;background:var(--chip)}
+
+  /* ── Left panel controls ── */
+  .panel-section{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:16px}
+
+  .term-row{display:flex;gap:8px;margin-bottom:10px}
+  .term-row input{flex:1;background:#0f1117;border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px 12px;font-size:.9rem}
+  .term-row input:focus{outline:none;border-color:var(--accent)}
+  .btn-add{background:var(--accent);color:#fff;border:none;border-radius:6px;padding:8px 14px;cursor:pointer;font-size:.9rem;white-space:nowrap;transition:.15s}
+  .btn-add:hover{background:var(--accent2)}
+
+  .chips{display:flex;flex-wrap:wrap;gap:6px;min-height:24px}
+  .chip{display:flex;align-items:center;gap:6px;background:var(--chip);border:1px solid #3d4470;border-radius:99px;padding:3px 10px;font-size:.82rem}
+  .chip button{background:none;border:none;color:var(--muted);cursor:pointer;font-size:.9rem;line-height:1;padding:0 1px}
+  .chip button:hover{color:var(--red)}
+
+  .toggle-row{display:flex;align-items:center;gap:10px;font-size:.88rem;padding:4px 0;cursor:pointer}
+  .toggle-row input[type=checkbox]{accent-color:var(--accent);width:15px;height:15px}
+
+  .radio-group{display:flex;gap:16px}
+  .radio-row{display:flex;align-items:center;gap:8px;font-size:.88rem;cursor:pointer}
+  .radio-row input{accent-color:var(--accent)}
+
+  /* ── Buttons ── */
+  .action-bar{display:flex;gap:12px}
+  .btn{border:none;border-radius:8px;padding:11px 22px;font-size:.95rem;font-weight:600;cursor:pointer;transition:.15s;display:flex;align-items:center;gap:8px}
+  .btn-primary{background:var(--accent);color:#fff}
+  .btn-primary:hover{background:var(--accent2)}
+  .btn-secondary{background:var(--surface2);color:var(--text);border:1px solid var(--border)}
+  .btn-secondary:hover{border-color:var(--accent);color:var(--accent2)}
+  .btn:disabled{opacity:.4;cursor:not-allowed}
+
+  /* ── Preview panel ── */
+  .preview-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;max-height:420px;overflow-y:auto;display:none}
+  .preview-panel.active{display:block}
+  .preview-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+  .preview-title{font-size:1rem;font-weight:600}
+  .preview-count{font-size:.8rem;color:var(--muted)}
+  .match-list{display:flex;flex-direction:column;gap:8px}
+  .match-item{background:var(--surface2);border-radius:7px;padding:10px 14px;font-size:.84rem}
+  .match-term{color:var(--accent2);font-weight:700;margin-bottom:4px}
+  .match-ctx{color:var(--muted);word-break:break-all;line-height:1.5}
+  mark{background:#3d2a6e;color:#c4b5fd;border-radius:3px;padding:0 2px}
+  .no-matches{color:var(--muted);text-align:center;padding:24px 0;font-size:.9rem}
+  .terms-summary{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
+  .terms-summary .chip{background:#1a1d27}
+
+  /* ── Status bar ── */
+  .status-bar{background:var(--surface);border-top:1px solid var(--border);padding:12px 32px;display:flex;align-items:center;gap:14px;font-size:.85rem}
+  .status-dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex-shrink:0;transition:.3s}
+  .status-dot.ok{background:var(--green)}
+  .status-dot.busy{background:#facc15;animation:pulse 1s infinite}
+  .status-dot.err{background:var(--red)}
+  .status-text{color:var(--muted);flex:1}
+  .progress-track{flex:0 0 200px;height:5px;background:var(--border);border-radius:99px;overflow:hidden}
+  .progress-bar{height:100%;background:var(--accent);border-radius:99px;width:0;transition:width .3s}
+
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+  /* ── Hint text ── */
+  .hint{font-size:.78rem;color:var(--muted);margin-top:6px;line-height:1.4}
+
+  /* ── Responsive ── */
+  @media(max-width:800px){
+    main{grid-template-columns:1fr}
+    aside{border-right:none;border-bottom:1px solid var(--border)}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Redacter <span>✦</span></div>
+  <div class="tagline">True document redaction</div>
+</header>
+
+<main>
+<!-- ════════════════════════ LEFT PANEL ════════════════════════ -->
+<aside>
+
+  <!-- Manual terms -->
+  <div class="panel-section">
+    <div class="section-title">Manual Terms</div>
+    <div class="term-row">
+      <input id="termInput" type="text" placeholder="Enter text to redact…"/>
+      <button class="btn-add" onclick="addTerm()">Add</button>
+    </div>
+    <div class="chips" id="chipContainer"></div>
+    <label class="toggle-row" style="margin-top:10px">
+      <input type="checkbox" id="caseSensitive"/>
+      Case-sensitive matching
+    </label>
+  </div>
+
+  <!-- Auto-detect -->
+  <div class="panel-section">
+    <div class="section-title">Auto-Detect</div>
+    <label class="toggle-row"><input type="checkbox" id="detectNames"/> Names</label>
+    <label class="toggle-row"><input type="checkbox" id="detectDates"/> Dates</label>
+    <label class="toggle-row"><input type="checkbox" id="detectTimes"/> Times</label>
+    <label class="toggle-row"><input type="checkbox" id="detectPhones"/> Phone Numbers</label>
+    <label class="toggle-row"><input type="checkbox" id="detectEmails"/> Email Addresses</label>
+    <label class="toggle-row"><input type="checkbox" id="detectSSN"/> SSN / ID Numbers</label>
+  </div>
+
+  <!-- Style -->
+  <div class="panel-section">
+    <div class="section-title">Redaction Style</div>
+    <div class="radio-group">
+      <label class="radio-row"><input type="radio" name="style" value="black" checked/> ■ Black Box</label>
+      <label class="radio-row"><input type="radio" name="style" value="blur"/> ≋ Blur</label>
+    </div>
+  </div>
+
+  <!-- OCR -->
+  <div class="panel-section">
+    <div class="section-title">OCR</div>
+    <label class="toggle-row"><input type="checkbox" id="useOcr"/> Scan images inside document</label>
+    <div class="hint">Enable for scanned PDFs or image-heavy documents. Processing will be slower.</div>
+  </div>
+
+</aside>
+
+<!-- ════════════════════════ WORKSPACE ════════════════════════ -->
+<div class="workspace">
+
+  <!-- Drop zone -->
+  <div>
+    <div class="section-title" style="margin-bottom:10px">Upload Files</div>
+    <div class="drop-zone" id="dropZone">
+      <span class="icon">📄</span>
+      <div class="label">Drop files here or <strong onclick="openPicker()">click to upload</strong></div>
+      <input type="file" id="fileInput" multiple
+        accept=".pdf,.docx,.doc,.xlsx,.pptx,.txt,.png,.jpg,.jpeg,.tiff"/>
+      <div class="accepted">PDF · DOCX · XLSX · PPTX · TXT · PNG · JPG · TIFF</div>
+    </div>
+  </div>
+
+  <!-- File queue -->
+  <div id="fileQueue" class="file-queue" style="display:none"></div>
+
+  <!-- Action bar -->
+  <div class="action-bar">
+    <button class="btn btn-secondary" id="btnPreview" onclick="doPreview()" disabled>
+      🔍 Preview Matches
+    </button>
+    <button class="btn btn-primary" id="btnRedact" onclick="doRedact()" disabled>
+      ✦ Redact &amp; Download
+    </button>
+  </div>
+
+  <!-- Preview panel -->
+  <div class="preview-panel" id="previewPanel">
+    <div class="preview-header">
+      <span class="preview-title">Preview — what will be redacted</span>
+      <span class="preview-count" id="previewCount"></span>
+    </div>
+    <div class="terms-summary" id="termsSummary"></div>
+    <div class="match-list" id="matchList"></div>
+  </div>
+
+</div>
+</main>
+
+<!-- Status bar -->
+<div class="status-bar">
+  <div class="status-dot" id="statusDot"></div>
+  <span class="status-text" id="statusText">Ready — upload a file to begin</span>
+  <div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+const fileQueue = []; // {fileId, file, status}
+let manualTerms = [];
+
+// ── Status helpers ──────────────────────────────────────────────────────────
+function setStatus(msg, state='idle', pct=0){
+  document.getElementById('statusText').textContent = msg;
+  const dot = document.getElementById('statusDot');
+  dot.className = 'status-dot' + (state==='ok'?' ok':state==='busy'?' busy':state==='err'?' err':'');
+  document.getElementById('progressBar').style.width = pct+'%';
+}
+
+// ── File picker ─────────────────────────────────────────────────────────────
+function openPicker(){
+  document.getElementById('fileInput').click();
+}
+
+document.getElementById('fileInput').addEventListener('change', e=>{
+  handleFiles([...e.target.files]);
+  e.target.value='';
+});
+
+// ── Drag and drop ───────────────────────────────────────────────────────────
+const dz = document.getElementById('dropZone');
+dz.addEventListener('dragover', e=>{e.preventDefault();dz.classList.add('drag-over')});
+dz.addEventListener('dragleave', ()=>dz.classList.remove('drag-over'));
+dz.addEventListener('drop', e=>{
+  e.preventDefault();dz.classList.remove('drag-over');
+  handleFiles([...e.dataTransfer.files]);
+});
+
+// ── Handle files ─────────────────────────────────────────────────────────────
+function handleFiles(files){
+  files.forEach(f=>uploadFile(f));
+}
+
+function fmtSize(n){
+  if(n<1024) return n+'B';
+  if(n<1024*1024) return (n/1024).toFixed(1)+'KB';
+  return (n/1024/1024).toFixed(1)+'MB';
+}
+
+async function uploadFile(file){
+  const entry = {fileId:null, file, status:'uploading'};
+  fileQueue.push(entry);
+  renderQueue();
+  setStatus(`Uploading ${file.name}…`,'busy',20);
+
+  const fd = new FormData();
+  fd.append('file', file);
+  try{
+    const r = await fetch('/upload',{method:'POST',body:fd});
+    const j = await r.json();
+    if(j.error) throw new Error(j.error);
+    entry.fileId = j.file_id;
+    entry.status = 'ready';
+    setStatus(`${file.name} uploaded — configure options and redact`,'ok',100);
+  }catch(e){
+    entry.status = 'error';
+    entry.error  = e.message;
+    setStatus(`Upload failed: ${e.message}`,'err',0);
+  }
+  renderQueue();
+  updateButtons();
+}
+
+function removeFile(idx){
+  fileQueue.splice(idx,1);
+  renderQueue();
+  updateButtons();
+  if(!fileQueue.length) setStatus('Ready — upload a file to begin','idle',0);
+}
+
+function renderQueue(){
+  const el = document.getElementById('fileQueue');
+  if(!fileQueue.length){el.style.display='none';return;}
+  el.style.display='flex';
+  el.innerHTML = fileQueue.map((e,i)=>{
+    const statusLabel = {
+      uploading:'⏳ Uploading',
+      ready:'✅ Ready',
+      redacting:'⚙️ Processing',
+      done:'✔ Done',
+      error:'❌ Error',
+    }[e.status]||e.status;
+    return `<div class="file-item">
+      <span style="font-size:1.3rem">${fileIcon(e.file.name)}</span>
+      <span class="fi-name" title="${e.file.name}">${e.file.name}</span>
+      <span class="fi-size">${fmtSize(e.file.size)}</span>
+      <span class="fi-status">${statusLabel}${e.error?': '+e.error:''}</span>
+      <button class="fi-remove" onclick="removeFile(${i})">✕</button>
+    </div>`;
+  }).join('');
+}
+
+function fileIcon(name){
+  const ext = name.split('.').pop().toLowerCase();
+  return {pdf:'📄',docx:'📝',doc:'📝',xlsx:'📊',pptx:'📊',txt:'📃',
+          png:'🖼',jpg:'🖼',jpeg:'🖼',tiff:'🖼',tif:'🖼'}[ext]||'📎';
+}
+
+function updateButtons(){
+  const hasReady = fileQueue.some(e=>e.status==='ready');
+  document.getElementById('btnPreview').disabled = !hasReady;
+  document.getElementById('btnRedact').disabled  = !hasReady;
+}
+
+// ── Manual terms ─────────────────────────────────────────────────────────────
+document.getElementById('termInput').addEventListener('keydown', e=>{
+  if(e.key==='Enter') addTerm();
+});
+
+function addTerm(){
+  const inp = document.getElementById('termInput');
+  const val = inp.value.trim();
+  if(!val||manualTerms.includes(val)) return;
+  manualTerms.push(val);
+  inp.value='';
+  renderChips();
+}
+
+function removeTerm(i){
+  manualTerms.splice(i,1);
+  renderChips();
+}
+
+function renderChips(){
+  document.getElementById('chipContainer').innerHTML =
+    manualTerms.map((t,i)=>
+      `<span class="chip">${escHtml(t)} <button onclick="removeTerm(${i})">×</button></span>`
+    ).join('');
+}
+
+// ── Build options payload ─────────────────────────────────────────────────────
+function buildOptions(){
+  return {
+    manual_terms: [...manualTerms],
+    case_sensitive: document.getElementById('caseSensitive').checked,
+    auto_detect:{
+      names:  document.getElementById('detectNames').checked,
+      dates:  document.getElementById('detectDates').checked,
+      times:  document.getElementById('detectTimes').checked,
+      phones: document.getElementById('detectPhones').checked,
+      emails: document.getElementById('detectEmails').checked,
+      ssn:    document.getElementById('detectSSN').checked,
+    },
+    style:   document.querySelector('input[name=style]:checked').value,
+    use_ocr: document.getElementById('useOcr').checked,
+  };
+}
+
+// ── Preview ──────────────────────────────────────────────────────────────────
+async function doPreview(){
+  const ready = fileQueue.filter(e=>e.status==='ready');
+  if(!ready.length) return;
+  // use first ready file for preview
+  const entry = ready[0];
+  setStatus(`Scanning ${entry.file.name} for matches…`,'busy',30);
+
+  try{
+    const r = await fetch('/preview',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({file_id:entry.fileId, options:buildOptions()})
+    });
+    const j = await r.json();
+    if(j.error) throw new Error(j.error);
+
+    const panel = document.getElementById('previewPanel');
+    panel.classList.add('active');
+    document.getElementById('previewCount').textContent = `${j.total} match${j.total!==1?'es':''}`;
+
+    // terms summary chips
+    document.getElementById('termsSummary').innerHTML =
+      (j.terms||[]).map(t=>`<span class="chip">${escHtml(t)}</span>`).join('');
+
+    const ml = document.getElementById('matchList');
+    if(!j.matches||!j.matches.length){
+      ml.innerHTML='<div class="no-matches">No matches found in this document.</div>';
+    } else {
+      ml.innerHTML = j.matches.slice(0,100).map(m=>{
+        const hl = escHtml(m.context).replace(
+          new RegExp(escRegex(escHtml(m.term)),'gi'),
+          s=>`<mark>${s}</mark>`
+        );
+        return `<div class="match-item">
+          <div class="match-term">${escHtml(m.term)}</div>
+          <div class="match-ctx">${hl}</div>
+        </div>`;
+      }).join('');
+      if(j.matches.length>100) ml.innerHTML+='<div class="no-matches">… and more</div>';
+    }
+    setStatus(`Found ${j.total} match${j.total!==1?'es':''} in ${entry.file.name}`,'ok',100);
+  }catch(e){
+    setStatus('Preview failed: '+e.message,'err',0);
+  }
+}
+
+// ── Redact ────────────────────────────────────────────────────────────────────
+async function doRedact(){
+  const ready = fileQueue.filter(e=>e.status==='ready');
+  if(!ready.length) return;
+
+  for(const entry of ready){
+    entry.status='redacting';
+    renderQueue();
+    setStatus(`Redacting ${entry.file.name}…`,'busy',50);
+    try{
+      const r = await fetch('/redact',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({file_id:entry.fileId, options:buildOptions()})
+      });
+      const j = await r.json();
+      if(j.error) throw new Error(j.error+(j.traceback?'\n'+j.traceback:''));
+
+      // auto-download
+      const a = document.createElement('a');
+      a.href = '/download/'+encodeURIComponent(j.download_id);
+      a.download = j.filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+
+      entry.status='done';
+      setStatus(`✔ ${j.filename} downloaded`,'ok',100);
+    }catch(e){
+      entry.status='error';
+      entry.error = e.message.split('\n')[0];
+      setStatus('Redaction failed: '+e.message.split('\n')[0],'err',0);
+    }
+    renderQueue();
+  }
+}
+
+// ── Utils ─────────────────────────────────────────────────────────────────────
+function escHtml(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) }
+function escRegex(s){ return s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&') }
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+setStatus('Ready — upload a file to begin');
+</script>
+</body>
+</html>

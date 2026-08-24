@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.pyo
+uploads/
+outputs/
+*.pdf
+*.docx
+*.xlsx
+*.pptx
+.env
+nohup.out
