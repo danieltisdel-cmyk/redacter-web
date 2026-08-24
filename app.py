@@ -609,14 +609,16 @@ def redact():
 
     try:
         dst = do_redact(file_id, options)
-        dl_id = Path(dst).name
-        # Return fields that match what the JS expects
         out_name = Path(dst).name.split('_', 1)[-1] if '_' in Path(dst).name else Path(dst).name
-        return jsonify(
-            download_url=f'/download/{dl_id}',
-            output_filename=out_name,
-            download_id=dl_id,
+        # Send file directly — avoids ephemeral storage timing issues on Railway
+        response = send_file(
+            dst,
+            as_attachment=True,
+            download_name=out_name,
+            mimetype='application/octet-stream',
         )
+        response.headers['X-Output-Filename'] = out_name
+        return response
     except Exception as e:
         return jsonify(error=str(e), traceback=traceback.format_exc()), 500
 

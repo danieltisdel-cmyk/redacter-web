@@ -477,28 +477,34 @@ redactBtn.addEventListener('click', async () => {
         style,
       }),
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Redaction failed');
+    // /redact now returns the file directly as binary
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Redaction failed' }));
+      throw new Error(err.error || 'Redaction failed');
+    }
 
-    const dlUrl = data.download_url;
-    const dlName = data.output_filename || 'redacted_file';
+    const dlName = res.headers.get('X-Output-Filename')
+      || res.headers.get('Content-Disposition')?.match(/filename="?([^"]+)"?/)?.[1]
+      || 'redacted_file.pdf';
+
+    const blob = await res.blob();
+    const dlUrl = URL.createObjectURL(blob);
 
     setStatus('Redaction complete ✓', 'done');
     showSuccess(
-      `${state.matches.length} match${state.matches.length !== 1 ? 'es' : ''} redacted successfully.`,
+      `Redacted successfully — tap below to download.`,
       dlUrl,
       dlName,
     );
 
-    // Auto-trigger download (only if URL is valid)
-    if (dlUrl) {
-      const a = document.createElement('a');
-      a.href = dlUrl;
-      a.download = dlName;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    }
+    // Trigger download
+    const a = document.createElement('a');
+    a.href = dlUrl;
+    a.download = dlName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(dlUrl), 10000);
 
   } catch (err) {
     setStatus('Redaction failed', 'error');
