@@ -23,4 +23,4 @@ ENV PORT=5050
 EXPOSE $PORT
 
 # gunicorn: 2 workers, 5-min timeout for large file processing
-CMD gunicorn --bind 0.0.0.0:$PORT --timeout 300 --workers 2 --max-requests 100 app:app
+CMD gunicorn --bind 0.0.0.0:$PORT --timeout 600 --workers 1 --max-requests 50 --graceful-timeout 60 app:app
