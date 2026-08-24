@@ -445,7 +445,7 @@ def do_redact(file_id: str, options: dict) -> str:
     src   = info['path']
     ext   = info['ext']
     name  = info['original_name']
-    stem  = Path(name).stem
+    stem  = Path(name).stem.replace(' ','_').replace('%','_')  # sanitize spaces
     out_name = f"{stem}_REDACTED{ext}"
     dst   = str(OUTPUT_DIR / f"{file_id}_{out_name}")
 
@@ -623,10 +623,10 @@ def redact():
         return jsonify(error=str(e), traceback=traceback.format_exc()), 500
 
 
-@app.route('/download/<dl_id>')
+@app.route('/download/<path:dl_id>')
 def download(dl_id: str):
-    # safety: no path traversal
-    safe = Path(dl_id).name
+    from urllib.parse import unquote
+    safe = Path(unquote(dl_id)).name  # URL-decode + strip any path
     p = OUTPUT_DIR / safe
     if not p.exists():
         return jsonify(error='File not found'), 404

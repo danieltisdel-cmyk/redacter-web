@@ -305,11 +305,17 @@ function renderQueue(){
       done:'✔ Done',
       error:'❌ Error',
     }[e.status]||e.status;
+    const dlBtn = e.status==='done' && e.downloadUrl
+      ? `<a href="${e.downloadUrl}" download="${e.downloadName}" target="_blank"
+           style="display:inline-block;padding:6px 14px;background:#10B981;color:#fff;
+                  border-radius:8px;text-decoration:none;font-size:.85rem;font-weight:600;
+                  margin-left:8px;">⬇ Download</a>`
+      : '';
     return `<div class="file-item">
       <span style="font-size:1.3rem">${fileIcon(e.file.name)}</span>
       <span class="fi-name" title="${e.file.name}">${e.file.name}</span>
       <span class="fi-size">${fmtSize(e.file.size)}</span>
-      <span class="fi-status">${statusLabel}${e.error?': '+e.error:''}</span>
+      <span class="fi-status">${statusLabel}${e.error?': '+e.error:''}${dlBtn}</span>
       <button class="fi-remove" onclick="removeFile(${i})">✕</button>
     </div>`;
   }).join('');
@@ -436,16 +442,11 @@ async function doRedact(){
       const j = await r.json();
       if(j.error) throw new Error(j.error+(j.traceback?'\n'+j.traceback:''));
 
-      // auto-download
-      const a = document.createElement('a');
-      a.href = '/download/'+encodeURIComponent(j.download_id);
-      a.download = j.filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-
+      // Show tappable download link — iOS blocks programmatic a.click()
+      entry.downloadUrl = '/download/'+encodeURIComponent(j.download_id);
+      entry.downloadName = j.filename;
       entry.status='done';
-      setStatus(`✔ ${j.filename} downloaded`,'ok',100);
+      setStatus(`✔ Done — tap the download button below`,'ok',100);
     }catch(e){
       entry.status='error';
       entry.error = e.message.split('\n')[0];
