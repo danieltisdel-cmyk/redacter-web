@@ -434,19 +434,34 @@ async function doRedact(){
     renderQueue();
     setStatus(`Redacting ${entry.file.name}…`,'busy',50);
     try{
+      // Step 1: start the job (returns immediately)
       const r = await fetch('/redact',{
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify({file_id:entry.fileId, options:buildOptions()})
       });
-      if(!r.ok){
-        const j = await r.json().catch(()=>({error:'Redaction failed'}));
-        throw new Error(j.error||'Redaction failed');
+      const startData = await r.json().catch(()=>({error:'Failed to start job'}));
+      if(!r.ok || startData.error) throw new Error(startData.error||'Failed to start redaction');
+      const jobId = startData.job_id;
+
+      // Step 2: poll until done
+      setStatus('Processing… (large files with OCR may take a few minutes)', 'busy', 60);
+      let jobResult = null;
+      for(let i=0; i<180; i++){   // max 6 min polling
+        await new Promise(res=>setTimeout(res,2000));
+        const poll = await fetch(`/job/${jobId}`);
+        const pollData = await poll.json();
+        if(pollData.status==='done'){ jobResult=pollData; break; }
+        if(pollData.status==='error') throw new Error(pollData.error||'Redaction failed');
+        // Update progress message every 10s
+        if(i%5===0) setStatus(`Processing page ${Math.min(i*2,100)}%… still working`, 'busy', Math.min(i*2,90));
       }
-      // Backend streams the file directly as binary
-      const blob = await r.blob();
-      const dlName = (r.headers.get('Content-Disposition')||'').match(/filename="?([^"\n]+)"?/)?.[1]
-        || entry.file.name.replace(/\.(\w+)$/,'_REDACTED.$1');
+      if(!jobResult) throw new Error('Timed out waiting for redaction — try with fewer options');
+
+      // Step 3: fetch the file
+      const dlName = jobResult.out_name || entry.file.name.replace(/\.(\w+)$/,'_REDACTED.$1');
+      const dlResp = await fetch(jobResult.download_url);
+      const blob = await dlResp.blob();
       entry.downloadUrl = URL.createObjectURL(blob);
       entry.downloadName = dlName;
       entry.status='done';

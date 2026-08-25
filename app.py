@@ -278,7 +278,6 @@ def redact_pdf(src: str, dst: str, terms: List[str], options: dict):
     regex       = build_regex(terms, case_sens)
 
     doc = fitz.open(src)
-    _ocr_img_count = [0]  # mutable counter for image OCR cap
     for page in doc:
         if regex:
             # text layer redaction
@@ -297,22 +296,19 @@ def redact_pdf(src: str, dst: str, terms: List[str], options: dict):
                         annot = page.add_redact_annot(rect, fill=(0, 0, 0))
             page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
 
-        # OCR-based image redaction (only when user explicitly enables OCR)
-        # Hard cap: max 40 images total across whole doc to prevent timeout
-        if use_ocr and HAS_TESSERACT and HAS_PIL and regex and _ocr_img_count[0] < 40:
+        # OCR-based image redaction
+        if use_ocr and HAS_TESSERACT and HAS_PIL and regex:
             for img in page.get_images(full=True):
-                if _ocr_img_count[0] >= 40:
-                    break
                 xref = img[0]
                 try:
                     base_image = doc.extract_image(xref)
                     raw = base_image['image']
-                    if len(raw) < 20000:  # skip logos/icons
+                    if len(raw) < 20000:
                         continue
                     pil_img = Image.open(io.BytesIO(raw)).convert('RGB')
                     if pil_img.width < 100 or pil_img.height < 100:
                         continue
-                    # Resize large images before OCR to speed it up
+                    # Resize before OCR for speed
                     if pil_img.width > 1500:
                         ratio = 1500 / pil_img.width
                         pil_img = pil_img.resize(
@@ -321,7 +317,6 @@ def redact_pdf(src: str, dst: str, terms: List[str], options: dict):
                     img_bytes = io.BytesIO()
                     pil_img.save(img_bytes, format='JPEG', quality=92)
                     doc.update_image(xref, stream=img_bytes.getvalue())
-                    _ocr_img_count[0] += 1
                 except Exception:
                     pass
 
@@ -618,18 +613,32 @@ def preview():
         return jsonify(error=str(e), traceback=traceback.format_exc()), 500
 
 
+# ── Async job store ───────────────────────────────────────────────────────────
+JOB_STORE: dict = {}   # job_id -> {status, dst, error, out_name}
+_job_lock = threading.Lock()
+
+def _run_redact_job(job_id: str, file_id: str, options: dict):
+    """Background thread: runs redaction and updates JOB_STORE."""
+    try:
+        dst = do_redact(file_id, options)
+        out_name = Path(dst).name.split('_', 1)[-1] if '_' in Path(dst).name else Path(dst).name
+        with _job_lock:
+            JOB_STORE[job_id] = {'status': 'done', 'dst': dst, 'out_name': out_name}
+    except Exception as e:
+        with _job_lock:
+            JOB_STORE[job_id] = {'status': 'error', 'error': str(e),
+                                  'traceback': traceback.format_exc()}
+
+
 @app.route('/redact', methods=['POST'])
 def redact():
-    data    = request.get_json(force=True)
-    file_id = data.get('file_id')
-
-    # JS sends matches array + style at top level; merge into options
-    options = data.get('options', {})
+    data     = request.get_json(force=True)
+    file_id  = data.get('file_id')
+    options  = data.get('options', {})
     matches_list = data.get('matches', [])
-    style = data.get('style', options.get('style', 'black'))
+    style    = data.get('style', options.get('style', 'black'))
     options['style'] = style
 
-    # Extract unique terms directly from the matches array if provided
     if matches_list:
         direct_terms = list(dict.fromkeys(
             m['text'] for m in matches_list if m.get('text')
@@ -637,20 +646,29 @@ def redact():
         if direct_terms:
             options['_direct_terms'] = direct_terms
 
-    try:
-        dst = do_redact(file_id, options)
-        out_name = Path(dst).name.split('_', 1)[-1] if '_' in Path(dst).name else Path(dst).name
-        # Send file directly — avoids ephemeral storage timing issues on Railway
-        response = send_file(
-            dst,
-            as_attachment=True,
-            download_name=out_name,
-            mimetype='application/octet-stream',
-        )
-        response.headers['X-Output-Filename'] = out_name
-        return response
-    except Exception as e:
-        return jsonify(error=str(e), traceback=traceback.format_exc()), 500
+    # Kick off background job — return immediately so HTTP doesn't time out
+    job_id = str(uuid.uuid4())
+    with _job_lock:
+        JOB_STORE[job_id] = {'status': 'processing'}
+
+    t = threading.Thread(target=_run_redact_job, args=(job_id, file_id, options), daemon=True)
+    t.start()
+
+    return jsonify(job_id=job_id), 202
+
+
+@app.route('/job/<job_id>')
+def job_status(job_id: str):
+    with _job_lock:
+        job = JOB_STORE.get(job_id)
+    if not job:
+        return jsonify(error='Unknown job'), 404
+    if job['status'] == 'done':
+        return jsonify(status='done', download_url=f'/download/{Path(job["dst"]).name}',
+                       out_name=job['out_name'])
+    if job['status'] == 'error':
+        return jsonify(status='error', error=job.get('error', 'Unknown error'))
+    return jsonify(status='processing')
 
 
 @app.route('/download/<path:dl_id>')
