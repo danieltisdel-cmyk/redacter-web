@@ -299,53 +299,87 @@ def redact_pdf(src: str, dst: str, terms: List[str], options: dict):
                         annot = page.add_redact_annot(rect, fill=(0, 0, 0))
             page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
 
-        # OCR image redaction — draw black rects ON the page over matched text
-        # This approach is reliable: no image replacement needed
+        # OCR image redaction — scan every large image, draw black rects on page
         if use_ocr and HAS_TESSERACT and HAS_PIL and regex:
             for img in page.get_images(full=True):
                 xref = img[0]
                 try:
-                    # Get image position on page
                     img_rects = page.get_image_rects(xref)
                     if not img_rects:
                         continue
-                    img_rect = img_rects[0]  # fitz.Rect on the page
+                    img_rect = img_rects[0]
 
                     base_image = doc.extract_image(xref)
                     raw = base_image['image']
-                    if len(raw) < 20000:
+                    if len(raw) < 10000:
                         continue
                     pil_img = Image.open(io.BytesIO(raw)).convert('RGB')
                     iw, ih = pil_img.width, pil_img.height
-                    if iw < 100 or ih < 100:
+                    if iw < 80 or ih < 80:
                         continue
 
                     # Resize for OCR speed
-                    scale = min(1.0, 1200 / iw)
+                    scale = min(1.0, 1400 / max(iw, 1))
                     if scale < 1.0:
                         pil_img = pil_img.resize(
                             (int(iw*scale), int(ih*scale)), Image.LANCZOS)
                         iw, ih = pil_img.width, pil_img.height
 
-                    # Get word-level bounding boxes from Tesseract
-                    data = pytesseract.image_to_data(
+                    # Get word-level bounding boxes
+                    ocr_data = pytesseract.image_to_data(
                         pil_img,
                         output_type=pytesseract.Output.DICT,
-                        config='--psm 3'
+                        config='--psm 3 --oem 3'
                     )
-                    n = len(data['text'])
+
+                    # Group matched words into line-level bounding boxes
+                    # (avoids missing words that span multiple detections)
+                    matched_boxes = []
+                    n = len(ocr_data['text'])
+                    i = 0
+                    while i < n:
+                        word = ocr_data['text'][i].strip()
+                        if word and regex.search(word):
+                            px = ocr_data['left'][i]
+                            py = ocr_data['top'][i]
+                            pw = ocr_data['width'][i]
+                            ph = ocr_data['height'][i]
+                            # Expand box slightly for clean coverage
+                            pad = 4
+                            matched_boxes.append((
+                                max(0, px-pad), max(0, py-pad),
+                                min(iw, px+pw+pad), min(ih, py+ph+pad)
+                            ))
+                        i += 1
+
+                    # Also do full-line scan: if a line contains a match,
+                    # black out the whole timestamp block (camera overlays)
+                    line_texts = {}
                     for i in range(n):
-                        word = data['text'][i].strip()
-                        if not word or not regex.search(word):
-                            continue
-                        # Map pixel coords back to PDF page coords
-                        px, py = data['left'][i], data['top'][i]
-                        pw, ph = data['width'][i], data['height'][i]
-                        # Pixel -> 0-1 fraction -> PDF rect coords
-                        x0 = img_rect.x0 + (px / iw) * img_rect.width
-                        y0 = img_rect.y0 + (py / ih) * img_rect.height
-                        x1 = img_rect.x0 + ((px+pw) / iw) * img_rect.width
-                        y1 = img_rect.y0 + ((py+ph) / ih) * img_rect.height
+                        key = (ocr_data['block_num'][i], ocr_data['par_num'][i], ocr_data['line_num'][i])
+                        if key not in line_texts:
+                            line_texts[key] = {'text':'','left':9999,'top':9999,'right':0,'bottom':0}
+                        w = ocr_data['text'][i].strip()
+                        if w:
+                            line_texts[key]['text'] += ' ' + w
+                            line_texts[key]['left']   = min(line_texts[key]['left'],   ocr_data['left'][i])
+                            line_texts[key]['top']    = min(line_texts[key]['top'],    ocr_data['top'][i])
+                            line_texts[key]['right']  = max(line_texts[key]['right'],  ocr_data['left'][i]+ocr_data['width'][i])
+                            line_texts[key]['bottom'] = max(line_texts[key]['bottom'], ocr_data['top'][i]+ocr_data['height'][i])
+                    for lt in line_texts.values():
+                        if regex.search(lt['text']):
+                            pad = 4
+                            matched_boxes.append((
+                                max(0, lt['left']-pad), max(0, lt['top']-pad),
+                                min(iw, lt['right']+pad), min(ih, lt['bottom']+pad)
+                            ))
+
+                    # Draw redaction rectangles on the PDF page
+                    for (px0, py0, px1, py1) in matched_boxes:
+                        x0 = img_rect.x0 + (px0 / iw) * img_rect.width
+                        y0 = img_rect.y0 + (py0 / ih) * img_rect.height
+                        x1 = img_rect.x0 + (px1 / iw) * img_rect.width
+                        y1 = img_rect.y0 + (py1 / ih) * img_rect.height
                         r = fitz.Rect(x0, y0, x1, y1)
                         if style == 'blur':
                             _blur_pdf_rect(page, r)
