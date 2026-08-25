@@ -283,20 +283,33 @@ def redact_pdf(src: str, dst: str, terms: List[str], options: dict):
     doc = fitz.open(src)
     for page in doc:
         if regex:
-            # text layer redaction
-            for m in regex.finditer(page.get_text()):
-                # find rects for every occurrence on the page
-                pass
-            # use fitz search for accurate rects
+            # Build a map of line bounding boxes so we can expand redactions
+            # to cover the full line when a partial match is found
+            blocks = page.get_text('dict', flags=fitz.TEXT_PRESERVE_WHITESPACE)['blocks']
+            line_rects = []
+            for b in blocks:
+                for line in b.get('lines', []):
+                    spans = line.get('spans', [])
+                    if not spans:
+                        continue
+                    line_text = ' '.join(s['text'] for s in spans)
+                    line_bbox = fitz.Rect(line['bbox'])
+                    line_rects.append((line_text, line_bbox))
+
+            # Text layer: find matches then expand to full line
             for term in terms:
-                flags = 0 if case_sens else fitz.TEXT_PRESERVE_WHITESPACE
                 rects = page.search_for(term, quads=False)
                 for rect in rects:
+                    # Find which line this rect belongs to and use full line rect
+                    expanded = rect
+                    for (lt, lr) in line_rects:
+                        if lr.intersects(rect):
+                            expanded = lr  # redact whole line
+                            break
                     if style == 'blur':
-                        # render region, blur with Pillow, re-insert
-                        _blur_pdf_rect(page, rect)
+                        _blur_pdf_rect(page, expanded)
                     else:
-                        annot = page.add_redact_annot(rect, fill=(0, 0, 0))
+                        page.add_redact_annot(expanded, fill=(0, 0, 0))
             page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
 
         # OCR image redaction — scan every large image, draw black rects on page
@@ -326,10 +339,12 @@ def redact_pdf(src: str, dst: str, terms: List[str], options: dict):
                         iw, ih = pil_img.width, pil_img.height
 
                     # Get word-level bounding boxes
+                    # psm 11 = sparse text, best for camera overlay timestamps
+                    # conf threshold 20 = catch low-contrast text in photos
                     ocr_data = pytesseract.image_to_data(
                         pil_img,
                         output_type=pytesseract.Output.DICT,
-                        config='--psm 3 --oem 3'
+                        config='--psm 11 --oem 3'
                     )
 
                     # Group matched words into line-level bounding boxes
