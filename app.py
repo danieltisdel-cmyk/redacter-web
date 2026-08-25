@@ -296,24 +296,16 @@ def redact_pdf(src: str, dst: str, terms: List[str], options: dict):
                         annot = page.add_redact_annot(rect, fill=(0, 0, 0))
             page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
 
-        # OCR-based image redaction
-        # Smart mode: always run OCR on large images (camera photos with timestamps)
-        # when dates/times auto-detect is on, even if full OCR is off
-        smart_ocr = options.get('auto_detect', {}).get('dates') or \
-                    options.get('auto_detect', {}).get('times')
-        run_img_ocr = (use_ocr or smart_ocr) and HAS_TESSERACT and HAS_PIL and regex
-
-        if run_img_ocr:
+        # OCR-based image redaction (only when user explicitly enables OCR)
+        if use_ocr and HAS_TESSERACT and HAS_PIL and regex:
             for img in page.get_images(full=True):
                 xref = img[0]
                 try:
                     base_image = doc.extract_image(xref)
                     raw = base_image['image']
-                    # Skip tiny images (logos, icons < 20KB) — only process real photos
-                    if len(raw) < 20000:
+                    if len(raw) < 20000:  # skip logos/icons
                         continue
                     pil_img = Image.open(io.BytesIO(raw)).convert('RGB')
-                    # Skip very small images by pixel size
                     if pil_img.width < 100 or pil_img.height < 100:
                         continue
                     pil_img = _redact_image_with_ocr(pil_img, terms, case_sens, style)
