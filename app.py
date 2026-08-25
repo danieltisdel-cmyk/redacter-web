@@ -278,6 +278,7 @@ def redact_pdf(src: str, dst: str, terms: List[str], options: dict):
     regex       = build_regex(terms, case_sens)
 
     doc = fitz.open(src)
+    _ocr_img_count = [0]  # mutable counter for image OCR cap
     for page in doc:
         if regex:
             # text layer redaction
@@ -297,8 +298,11 @@ def redact_pdf(src: str, dst: str, terms: List[str], options: dict):
             page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
 
         # OCR-based image redaction (only when user explicitly enables OCR)
-        if use_ocr and HAS_TESSERACT and HAS_PIL and regex:
+        # Hard cap: max 40 images total across whole doc to prevent timeout
+        if use_ocr and HAS_TESSERACT and HAS_PIL and regex and _ocr_img_count[0] < 40:
             for img in page.get_images(full=True):
+                if _ocr_img_count[0] >= 40:
+                    break
                 xref = img[0]
                 try:
                     base_image = doc.extract_image(xref)
@@ -308,10 +312,16 @@ def redact_pdf(src: str, dst: str, terms: List[str], options: dict):
                     pil_img = Image.open(io.BytesIO(raw)).convert('RGB')
                     if pil_img.width < 100 or pil_img.height < 100:
                         continue
+                    # Resize large images before OCR to speed it up
+                    if pil_img.width > 1500:
+                        ratio = 1500 / pil_img.width
+                        pil_img = pil_img.resize(
+                            (1500, int(pil_img.height * ratio)), Image.LANCZOS)
                     pil_img = _redact_image_with_ocr(pil_img, terms, case_sens, style)
                     img_bytes = io.BytesIO()
                     pil_img.save(img_bytes, format='JPEG', quality=92)
                     doc.update_image(xref, stream=img_bytes.getvalue())
+                    _ocr_img_count[0] += 1
                 except Exception:
                     pass
 
