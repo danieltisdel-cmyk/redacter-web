@@ -101,19 +101,35 @@ PATTERNS = {
 }
 
 NAME_STOPWORDS = {
+    # Common doc words
     'The','This','That','With','From','Page','Date','Time','Section',
-    'Table','Figure','Dear','Kind','Best','Regards','Dear','Hello',
-    'Subject','Re','Cc','Bcc','To','In','At','On','Of','For',
+    'Table','Figure','Dear','Kind','Best','Regards','Hello','Subject',
+    'Re','Cc','Bcc','To','In','At','On','Of','For','And','Or','But',
+    # Inspection/report words
+    'Visual','Testing','Remote','Drain','Weld','Label','Observation',
+    'Comments','Applied','Technical','Services','Inspection','General',
+    'Main','Scope','Access','Findings','Signoff','Report','Summary',
+    'Section','Appendix','Total','Pass','Fail','Result','Results',
+    'Inspector','Level','Certificate','Standard','Method','Procedure',
+    'Client','Customer','Project','Location','Facility','Plant','Site',
+    'Drawing','Reference','Number','Rev','Page','Of','Per','Per',
+    'Note','Notes','See','Refer','Attached','Enclosure','Exhibit',
+    'January','February','March','April','June','July','August',
+    'September','October','November','December',
+    # Single-letter second names (like 'Drain A', 'Weld B')
 }
 
 
 def find_names(text: str) -> List[str]:
-    matches = re.findall(r'\b([A-Z][a-z]{1,20})\s+([A-Z][a-z]{1,20})\b', text)
+    # Require BOTH words >= 3 chars to reduce false positives
+    matches = re.findall(r'\b([A-Z][a-z]{2,20})\s+([A-Z][a-z]{2,20})\b', text)
     seen = set()
     result = []
     for f, l in matches:
         name = f"{f} {l}"
-        if f not in NAME_STOPWORDS and l not in NAME_STOPWORDS and name not in seen:
+        if (f not in NAME_STOPWORDS
+                and l not in NAME_STOPWORDS
+                and name not in seen):
             seen.add(name)
             result.append(name)
     return result
@@ -281,16 +297,28 @@ def redact_pdf(src: str, dst: str, terms: List[str], options: dict):
             page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
 
         # OCR-based image redaction
-        if use_ocr and HAS_TESSERACT and HAS_PIL and regex:
+        # Smart mode: always run OCR on large images (camera photos with timestamps)
+        # when dates/times auto-detect is on, even if full OCR is off
+        smart_ocr = options.get('auto_detect', {}).get('dates') or \
+                    options.get('auto_detect', {}).get('times')
+        run_img_ocr = (use_ocr or smart_ocr) and HAS_TESSERACT and HAS_PIL and regex
+
+        if run_img_ocr:
             for img in page.get_images(full=True):
                 xref = img[0]
                 try:
                     base_image = doc.extract_image(xref)
-                    pil_img = Image.open(io.BytesIO(base_image['image'])).convert('RGB')
+                    raw = base_image['image']
+                    # Skip tiny images (logos, icons < 20KB) — only process real photos
+                    if len(raw) < 20000:
+                        continue
+                    pil_img = Image.open(io.BytesIO(raw)).convert('RGB')
+                    # Skip very small images by pixel size
+                    if pil_img.width < 100 or pil_img.height < 100:
+                        continue
                     pil_img = _redact_image_with_ocr(pil_img, terms, case_sens, style)
-                    # replace image in PDF
                     img_bytes = io.BytesIO()
-                    pil_img.save(img_bytes, format='PNG')
+                    pil_img.save(img_bytes, format='JPEG', quality=92)
                     doc.update_image(xref, stream=img_bytes.getvalue())
                 except Exception:
                     pass
