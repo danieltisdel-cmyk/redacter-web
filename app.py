@@ -296,8 +296,9 @@ def redact_pdf(src: str, dst: str, terms: List[str], options: dict):
                         annot = page.add_redact_annot(rect, fill=(0, 0, 0))
             page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
 
-        # OCR-based image redaction
+        # OCR-based image redaction — parallel per page
         if use_ocr and HAS_TESSERACT and HAS_PIL and regex:
+            page_images = []
             for img in page.get_images(full=True):
                 xref = img[0]
                 try:
@@ -308,17 +309,56 @@ def redact_pdf(src: str, dst: str, terms: List[str], options: dict):
                     pil_img = Image.open(io.BytesIO(raw)).convert('RGB')
                     if pil_img.width < 100 or pil_img.height < 100:
                         continue
-                    # Resize before OCR for speed
-                    if pil_img.width > 1500:
-                        ratio = 1500 / pil_img.width
-                        pil_img = pil_img.resize(
-                            (1500, int(pil_img.height * ratio)), Image.LANCZOS)
-                    pil_img = _redact_image_with_ocr(pil_img, terms, case_sens, style)
-                    img_bytes = io.BytesIO()
-                    pil_img.save(img_bytes, format='JPEG', quality=92)
-                    doc.update_image(xref, stream=img_bytes.getvalue())
+                    page_images.append((xref, pil_img))
                 except Exception:
                     pass
+
+            def _process_one_image(args):
+                xref, pil_img = args
+                try:
+                    # Resize for speed
+                    if pil_img.width > 1200:
+                        ratio = 1200 / pil_img.width
+                        pil_img = pil_img.resize(
+                            (1200, int(pil_img.height * ratio)), Image.LANCZOS)
+                    # Corner-region OCR: timestamps always in corners
+                    # Scan top-left, top-right, bottom-left, bottom-right (15% of image)
+                    w, h = pil_img.width, pil_img.height
+                    cx, cy = int(w * 0.35), int(h * 0.15)
+                    corners = [
+                        (0, 0, cx, cy),           # top-left
+                        (w-cx, 0, w, cy),          # top-right
+                        (0, h-cy, cx, h),          # bottom-left
+                        (w-cx, h-cy, w, h),        # bottom-right
+                    ]
+                    corner_has_match = False
+                    for box in corners:
+                        crop = pil_img.crop(box)
+                        try:
+                            txt = pytesseract.image_to_string(crop, config='--psm 6')
+                            if regex.search(txt):
+                                corner_has_match = True
+                                break
+                        except Exception:
+                            pass
+                    # Full redact pass only if corner matched OR do full scan
+                    if corner_has_match or True:  # always do full for accuracy
+                        pil_img = _redact_image_with_ocr(pil_img, terms, case_sens, style)
+                    img_bytes = io.BytesIO()
+                    pil_img.save(img_bytes, format='JPEG', quality=90)
+                    return xref, img_bytes.getvalue()
+                except Exception:
+                    return xref, None
+
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                results = list(pool.map(_process_one_image, page_images))
+            for xref, data in results:
+                if data:
+                    try:
+                        doc.update_image(xref, stream=data)
+                    except Exception:
+                        pass
 
     doc.save(dst, garbage=4, deflate=True)
     doc.close()

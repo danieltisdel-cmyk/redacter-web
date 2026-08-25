@@ -447,7 +447,7 @@ async function doRedact(){
       // Step 2: poll until done
       setStatus('Processing… (large files with OCR may take a few minutes)', 'busy', 60);
       let jobResult = null;
-      for(let i=0; i<180; i++){   // max 6 min polling
+      for(let i=0; i<600; i++){   // max 20 min polling
         await new Promise(res=>setTimeout(res,2000));
         const poll = await fetch(`/job/${jobId}`);
         const pollData = await poll.json();
