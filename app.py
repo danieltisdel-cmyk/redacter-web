@@ -121,15 +121,18 @@ NAME_STOPWORDS = {
 
 
 def find_names(text: str) -> List[str]:
-    # Require BOTH words >= 3 chars to reduce false positives
-    matches = re.findall(r'\b([A-Z][a-z]{2,20})\s+([A-Z][a-z]{2,20})\b', text)
+    # Require BOTH words >= 4 chars, neither in stopword list
+    matches = re.findall(r'\b([A-Z][a-z]{3,20})\s+([A-Z][a-z]{3,20})\b', text)
     seen = set()
     result = []
     for f, l in matches:
         name = f"{f} {l}"
         if (f not in NAME_STOPWORDS
                 and l not in NAME_STOPWORDS
-                and name not in seen):
+                and name not in seen
+                # Skip if either word ends in common suffixes (not person names)
+                and not f.endswith(('tion','ment','ness','ance','ence','ity','ing','ized'))
+                and not l.endswith(('tion','ment','ness','ance','ence','ity','ing','ized'))):
             seen.add(name)
             result.append(name)
     return result
@@ -296,69 +299,60 @@ def redact_pdf(src: str, dst: str, terms: List[str], options: dict):
                         annot = page.add_redact_annot(rect, fill=(0, 0, 0))
             page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
 
-        # OCR-based image redaction — parallel per page
+        # OCR image redaction — draw black rects ON the page over matched text
+        # This approach is reliable: no image replacement needed
         if use_ocr and HAS_TESSERACT and HAS_PIL and regex:
-            page_images = []
             for img in page.get_images(full=True):
                 xref = img[0]
                 try:
+                    # Get image position on page
+                    img_rects = page.get_image_rects(xref)
+                    if not img_rects:
+                        continue
+                    img_rect = img_rects[0]  # fitz.Rect on the page
+
                     base_image = doc.extract_image(xref)
                     raw = base_image['image']
                     if len(raw) < 20000:
                         continue
                     pil_img = Image.open(io.BytesIO(raw)).convert('RGB')
-                    if pil_img.width < 100 or pil_img.height < 100:
+                    iw, ih = pil_img.width, pil_img.height
+                    if iw < 100 or ih < 100:
                         continue
-                    page_images.append((xref, pil_img))
+
+                    # Resize for OCR speed
+                    scale = min(1.0, 1200 / iw)
+                    if scale < 1.0:
+                        pil_img = pil_img.resize(
+                            (int(iw*scale), int(ih*scale)), Image.LANCZOS)
+                        iw, ih = pil_img.width, pil_img.height
+
+                    # Get word-level bounding boxes from Tesseract
+                    data = pytesseract.image_to_data(
+                        pil_img,
+                        output_type=pytesseract.Output.DICT,
+                        config='--psm 3'
+                    )
+                    n = len(data['text'])
+                    for i in range(n):
+                        word = data['text'][i].strip()
+                        if not word or not regex.search(word):
+                            continue
+                        # Map pixel coords back to PDF page coords
+                        px, py = data['left'][i], data['top'][i]
+                        pw, ph = data['width'][i], data['height'][i]
+                        # Pixel -> 0-1 fraction -> PDF rect coords
+                        x0 = img_rect.x0 + (px / iw) * img_rect.width
+                        y0 = img_rect.y0 + (py / ih) * img_rect.height
+                        x1 = img_rect.x0 + ((px+pw) / iw) * img_rect.width
+                        y1 = img_rect.y0 + ((py+ph) / ih) * img_rect.height
+                        r = fitz.Rect(x0, y0, x1, y1)
+                        if style == 'blur':
+                            _blur_pdf_rect(page, r)
+                        else:
+                            page.draw_rect(r, color=(0,0,0), fill=(0,0,0))
                 except Exception:
                     pass
-
-            def _process_one_image(args):
-                xref, pil_img = args
-                try:
-                    # Resize for speed
-                    if pil_img.width > 1200:
-                        ratio = 1200 / pil_img.width
-                        pil_img = pil_img.resize(
-                            (1200, int(pil_img.height * ratio)), Image.LANCZOS)
-                    # Corner-region OCR: timestamps always in corners
-                    # Scan top-left, top-right, bottom-left, bottom-right (15% of image)
-                    w, h = pil_img.width, pil_img.height
-                    cx, cy = int(w * 0.35), int(h * 0.15)
-                    corners = [
-                        (0, 0, cx, cy),           # top-left
-                        (w-cx, 0, w, cy),          # top-right
-                        (0, h-cy, cx, h),          # bottom-left
-                        (w-cx, h-cy, w, h),        # bottom-right
-                    ]
-                    corner_has_match = False
-                    for box in corners:
-                        crop = pil_img.crop(box)
-                        try:
-                            txt = pytesseract.image_to_string(crop, config='--psm 6')
-                            if regex.search(txt):
-                                corner_has_match = True
-                                break
-                        except Exception:
-                            pass
-                    # Full redact pass only if corner matched OR do full scan
-                    if corner_has_match or True:  # always do full for accuracy
-                        pil_img = _redact_image_with_ocr(pil_img, terms, case_sens, style)
-                    img_bytes = io.BytesIO()
-                    pil_img.save(img_bytes, format='JPEG', quality=90)
-                    return xref, img_bytes.getvalue()
-                except Exception:
-                    return xref, None
-
-            from concurrent.futures import ThreadPoolExecutor
-            with ThreadPoolExecutor(max_workers=4) as pool:
-                results = list(pool.map(_process_one_image, page_images))
-            for xref, data in results:
-                if data:
-                    try:
-                        doc.update_image(xref, stream=data)
-                    except Exception:
-                        pass
 
     doc.save(dst, garbage=4, deflate=True)
     doc.close()
